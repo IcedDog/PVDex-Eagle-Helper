@@ -42,30 +42,39 @@ async function main() {
   await mkdir(outputDir, { recursive: true });
 
   const folderId = makeId(`folder:${packName}`);
-  const images = new Array(entries.length);
+  const images = [];
+  let skipped = 0;
 
   let completed = 0;
   await runWithConcurrency(entries, concurrency, async (entry, index) => {
-    const imageRecord = await buildEntryRecord({
-      entry,
-      outputDir,
-      folderId
-    });
-    images[index] = imageRecord;
-    completed += 1;
-
-    if (completed === entries.length || completed % 25 === 0) {
-      console.log(`Built ${completed}/${entries.length} items`);
+    try {
+      const imageRecord = await buildEntryRecord({
+        entry,
+        outputDir,
+        folderId
+      });
+      images[index] = imageRecord;
+    } catch (error) {
+      skipped += 1;
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`Warning: skipped ${entry.id} (${entry.title ?? "untitled"}): ${message}`);
+    } finally {
+      completed += 1;
+      if (completed === entries.length || completed % 25 === 0) {
+        console.log(`Processed ${completed}/${entries.length} items`);
+      }
     }
   });
 
-  const modificationTime = images.reduce(
+  const builtImages = images.filter(Boolean);
+
+  const modificationTime = builtImages.reduce(
     (max, image) => Math.max(max, image.lastModified ?? image.modificationTime ?? 0),
     Date.now()
   );
 
   const packJson = {
-    images,
+    images: builtImages,
     folder: {
       id: folderId,
       name: packName,
@@ -85,6 +94,9 @@ async function main() {
   await writeFile(path.join(outputDir, "pack.json"), JSON.stringify(packJson));
 
   console.log(`Wrote Eagle pack to ${outputDir}`);
+  if (skipped > 0) {
+    console.warn(`Warning: skipped ${skipped} item(s) due to build/download errors.`);
+  }
 }
 
 function parseArgs(argv) {
