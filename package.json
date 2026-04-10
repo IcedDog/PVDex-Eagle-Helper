@@ -1,0 +1,13 @@
+{
+  "name": "pvdex-eaglepack-builder",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:eaglepack": "node ./scripts/build-eagle-pack.mjs",
+    "check": "node --check ./scripts/build-eagle-pack.mjs"
+  },
+  "dependencies": {
+    "@material/material-color-utilities": "^0.3.0",
+    "sharp": "^0.34.4"
+  }
+}
