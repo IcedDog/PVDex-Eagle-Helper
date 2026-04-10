@@ -1,0 +1,65 @@
+name: Build PVDex Eaglepack
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Fetch latest videos dataset
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .tmp
+
+          if curl --fail --silent --show-error --location "https://pvref.flux-ion.cn/api/videos" -o .tmp/videos.json; then
+            echo "Fetched latest API payload."
+          else
+            echo "Falling back to checked-in sample videos.json."
+            cp videos.json .tmp/videos.json
+          fi
+
+      - name: Build Eagle pack folder
+        run: pnpm run build:eaglepack -- --input .tmp/videos.json --output build/PVDex --pack-name PVDex --concurrency 8
+
+      - name: Archive Eagle pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f build/PVDex.zip build/PVDex.eaglepack
+          (
+            cd build/PVDex
+            zip -qr ../PVDex.zip .
+          )
+          mv build/PVDex.zip build/PVDex.eaglepack
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PVDex.eaglepack
+          path: build/PVDex.eaglepack
+          if-no-files-found: error
