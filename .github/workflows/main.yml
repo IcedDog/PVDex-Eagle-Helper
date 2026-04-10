@@ -3,7 +3,7 @@ name: Build PVDex Eaglepack
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 2 * * 0"
+    - cron: "0 2 * * *"
 
 permissions:
   contents: read
@@ -51,10 +51,20 @@ jobs:
         run: |
           set -euo pipefail
           rm -f build/PVDex.zip build/PVDex.eaglepack
-          (
-            cd build/PVDex
-            zip -qr ../PVDex.zip .
-          )
+          python3 - <<'PY'
+          import os
+          import zipfile
+
+          source_dir = "build/PVDex"
+          zip_path = "build/PVDex.zip"
+
+          with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+              for root, _, files in os.walk(source_dir):
+                  for file_name in files:
+                      full_path = os.path.join(root, file_name)
+                      arcname = os.path.relpath(full_path, source_dir)
+                      zf.write(full_path, arcname)
+          PY
           mv build/PVDex.zip build/PVDex.eaglepack
 
       - name: Upload artifact
