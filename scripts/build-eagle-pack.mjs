@@ -136,23 +136,27 @@ async function buildEntryRecord({ entry, outputDir, folderId }) {
   const metrics = parseJsonValue(entry.metrics, {});
   const tags = parseJsonValue(entry.tags, []);
   const website = buildWebsite(entry.bvid);
+  const medium = detectMedium(entry.bvid);
+  const videoId = extractVideoId(entry.bvid);
   const annotation = buildAnnotation(entry, metrics);
   const star = computeStar(entry.views);
   const timestamp = getTimestamp(entry.createdAt);
   const safeName = sanitizeWindowsName(entry.title, entry.id);
+  const itemName = buildBookmarkBaseName(safeName, website);
 
-  const asset = await downloadCover(entry.cover, entry.id, safeName);
+  const asset = await buildVideoAsset(entry.cover, website, entry.id, itemName);
   const itemDir = path.join(outputDir, `${entry.id}.info`);
   await mkdir(itemDir, { recursive: true });
-  await writeFile(path.join(itemDir, asset.fileName), asset.buffer);
+  await writeFile(path.join(itemDir, asset.linkFileName), asset.linkBuffer);
+  await writeFile(path.join(itemDir, asset.thumbnailFileName), asset.thumbnailBuffer);
 
   const imageRecord = {
     id: entry.id,
-    name: safeName,
-    size: asset.buffer.length,
+    name: itemName,
+    size: asset.linkBuffer.length,
     btime: timestamp,
     mtime: timestamp,
-    ext: asset.ext,
+    ext: "url",
     tags,
     folders: [folderId],
     isDeleted: false,
@@ -160,22 +164,39 @@ async function buildEntryRecord({ entry, outputDir, folderId }) {
     annotation,
     star,
     modificationTime: timestamp,
-    noThumbnail: true,
+    noThumbnail: false,
     width: asset.width,
     height: asset.height,
     lastModified: timestamp + 1,
     palettes: asset.palettes
   };
 
+  if (medium) {
+    imageRecord.medium = medium;
+  }
+
+  if (videoId) {
+    imageRecord.videoID = videoId;
+  }
+
+  const duration = extractDuration(entry, metrics);
+  if (duration) {
+    imageRecord.duration = duration;
+  }
+
+  if (medium === "bilibili" && videoId) {
+    imageRecord.embed = `https://player.bilibili.com/player.html?bvid=${videoId}&page=1`;
+  }
+
   await writeFile(path.join(itemDir, "metadata.json"), JSON.stringify(imageRecord));
 
   return imageRecord;
 }
 
-async function downloadCover(url, id, safeName) {
-  const response = await fetch(url, {
+async function buildVideoAsset(coverUrl, website, id, itemName) {
+  const response = await fetch(coverUrl, {
     headers: {
-      "user-agent": "pvdex-eaglepack-builder/1.0"
+      "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
     }
   });
 
@@ -188,17 +209,18 @@ async function downloadCover(url, id, safeName) {
   const metadata = await image.metadata();
 
   if (!metadata.width || !metadata.height) {
-    throw new Error(`Unable to infer dimensions for ${id} from ${url}`);
+    throw new Error(`Unable to infer dimensions for ${id} from ${coverUrl}`);
   }
 
-  const ext = normalizeExt(metadata.format, url, response.headers.get("content-type"));
-  const fileName = `${safeName}.${ext}`;
+  const linkBuffer = Buffer.from(`[InternetShortcut]\r\nURL=${website}\r\n`, "utf8");
+  const thumbnailBuffer = await sharp(buffer).rotate().png().toBuffer();
   const palettes = await extractPalettes(buffer);
 
   return {
-    buffer,
-    ext,
-    fileName,
+    linkBuffer,
+    linkFileName: `${itemName}.url`,
+    thumbnailBuffer,
+    thumbnailFileName: `${itemName}_thumbnail.png`,
     width: metadata.width,
     height: metadata.height,
     palettes
@@ -276,6 +298,51 @@ function buildWebsite(bvid) {
   }
 
   return `https://www.youtube.com/watch?v=${bvid}`;
+}
+
+function detectMedium(bvid) {
+  if (typeof bvid !== "string" || bvid.length === 0) {
+    return "";
+  }
+
+  if (bvid.startsWith("BV")) {
+    return "bilibili";
+  }
+
+  if (bvid.startsWith("YT_")) {
+    return "youtube";
+  }
+
+  return "";
+}
+
+function extractVideoId(bvid) {
+  if (typeof bvid !== "string" || bvid.length === 0) {
+    return "";
+  }
+
+  if (bvid.startsWith("YT_")) {
+    return bvid.slice(3);
+  }
+
+  return bvid;
+}
+
+function extractDuration(entry, metrics) {
+  const candidates = [metrics.duration, metrics.length, entry.duration];
+
+  for (const candidate of candidates) {
+    if (candidate == null || candidate === "") {
+      continue;
+    }
+
+    const numeric = Number(candidate);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return String(Math.round(numeric));
+    }
+  }
+
+  return "";
 }
 
 function computeStar(views) {
@@ -384,6 +451,18 @@ function normalizeExt(format, url, contentType) {
   }
 
   return "jpg";
+}
+
+function buildBookmarkBaseName(safeName, website) {
+  let host = "";
+
+  try {
+    host = new URL(website).host.replace(/\./g, "");
+  } catch {
+    host = "";
+  }
+
+  return sanitizeWindowsName(host ? `${safeName} - ${host}` : safeName, safeName);
 }
 
 function sanitizeWindowsName(name, fallbackName = "cover") {
