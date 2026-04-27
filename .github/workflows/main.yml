@@ -3,7 +3,7 @@ name: Build PVDex Eaglepack
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 2 * * *"
+    - cron: "0 2 * * SUN"
 
 permissions:
   contents: read
